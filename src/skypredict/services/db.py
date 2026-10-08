@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,6 +96,24 @@ def init_db(path=METRICS_DB_PATH) -> None:
         conn.executescript(_SCHEMA)
 
 
+# Ensures tables exist before any read/write, even on a brand-new database
+# (e.g. the first time the app runs anywhere, including Streamlit Cloud where
+# the Overview reads the logs before any pipeline run has created them).
+_ensure_lock = threading.Lock()
+_initialized_paths: set[str] = set()
+
+
+def ensure_schema(path=METRICS_DB_PATH) -> None:
+    """Create the schema for ``path`` once per process if it does not exist."""
+    key = str(Path(path).resolve())
+    if key in _initialized_paths:
+        return
+    with _ensure_lock:
+        if key not in _initialized_paths:
+            init_db(path)
+            _initialized_paths.add(key)
+
+
 def insert_pipeline_run(
     path=METRICS_DB_PATH,
     *,
@@ -106,6 +125,7 @@ def insert_pipeline_run(
     counts: dict | None = None,
     error_summary: str | None = None,
 ) -> int:
+    ensure_schema(path)
     counts = counts or {}
     with connect(path) as conn:
         cur = conn.execute(
@@ -148,6 +168,7 @@ def insert_model_run(
     artifact_path: str | None = None,
     error_summary: str | None = None,
 ) -> int:
+    ensure_schema(path)
     ranges = date_ranges or {}
     samples = sample_counts or {}
     with connect(path) as conn:
@@ -184,6 +205,7 @@ def insert_model_run(
 
 
 def insert_prediction(path=METRICS_DB_PATH, **fields) -> int:
+    ensure_schema(path)
     with connect(path) as conn:
         cur = conn.execute(
             """INSERT INTO predictions
@@ -214,6 +236,7 @@ def _rows_to_dicts(rows) -> list[dict]:
 
 
 def list_pipeline_runs(path=METRICS_DB_PATH, limit: int = 100) -> list[dict]:
+    ensure_schema(path)
     with connect(path) as conn:
         rows = conn.execute(
             "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?", (limit,)
@@ -222,6 +245,7 @@ def list_pipeline_runs(path=METRICS_DB_PATH, limit: int = 100) -> list[dict]:
 
 
 def list_model_runs(path=METRICS_DB_PATH, limit: int = 100) -> list[dict]:
+    ensure_schema(path)
     with connect(path) as conn:
         rows = conn.execute(
             "SELECT * FROM model_runs ORDER BY id DESC LIMIT ?", (limit,)
@@ -230,6 +254,7 @@ def list_model_runs(path=METRICS_DB_PATH, limit: int = 100) -> list[dict]:
 
 
 def list_predictions(path=METRICS_DB_PATH, limit: int = 200) -> list[dict]:
+    ensure_schema(path)
     with connect(path) as conn:
         rows = conn.execute(
             "SELECT * FROM predictions ORDER BY id DESC LIMIT ?", (limit,)
