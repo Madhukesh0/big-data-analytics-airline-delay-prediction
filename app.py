@@ -168,8 +168,53 @@ def view_data_etl() -> None:
     if spark_ok:
         st.success("Spark is available (PySpark, local mode).")
     else:
-        st.warning(f"Spark unavailable — the ETL will use the clearly-labelled "
-                   f"**pandas fallback**. Reason: {spark_msg}")
+        st.info(
+            "Note: this environment has no Java 17, so the ETL uses the built-in "
+            "**pandas fallback** — the same validation, features, and Parquet layout, "
+            "just not Spark. This is the normal mode on e.g. Streamlit Cloud. "
+            "Training and predictions are unaffected."
+        )
+
+    # One-click demo: data -> ETL -> train all models, so a brand-new visitor can
+    # go from empty state to working predictions with a single click.
+    if st.button("⚡ Run complete demo (generate data → ETL → train all models)",
+                 type="primary", width="stretch"):
+        with st.spinner("Running the full demo: generating data, running ETL and "
+                        "training all models — this takes a minute ..."):
+            from skypredict.models.train import train_all
+
+            flights, weather = generate_demo_data()
+            demo = flights.copy()
+            demo["flight_date"] = pd.to_datetime(demo["flight_date"]).dt.strftime("%Y-%m-%d")
+            demo["scheduled_departure"] = demo["sched_dep_minute"].map(
+                lambda m: int(m) // 60 * 100 + int(m) % 60)
+            demo["scheduled_arrival"] = demo["sched_arr_minute"].map(
+                lambda m: int(m) // 60 * 100 + int(m) % 60)
+            demo = demo.rename(columns={"sched_duration_minutes": "scheduled_duration_minutes"})
+            demo = demo.drop(columns=["sched_dep_minute", "sched_arr_minute", "is_delayed"])
+            demo.to_csv(DEMO_FLIGHTS_CSV, index=False)
+            w = weather.copy()
+            w["observation_date"] = pd.to_datetime(w["observation_date"]).dt.strftime("%Y-%m-%d")
+            w.to_csv(DEMO_WEATHER_CSV, index=False)
+
+            etl = run_etl(DEMO_FLIGHTS_CSV, SYNTHETIC_SOURCE_LABEL, require_target=True,
+                          weather_csv=DEMO_WEATHER_CSV, engine="auto",
+                          db_path=METRICS_DB_PATH)
+            features = load_curated_features(CURATED_FEATURES_DIR)
+            trained = train_all(features, dataset_source=SYNTHETIC_SOURCE_LABEL,
+                                models=("baseline", "random_forest", "xgboost"),
+                                models_dir=MODELS_DIR, db_path=METRICS_DB_PATH)
+        st.success(f"Full demo ready! ETL engine **{etl.engine}** · run `{trained.run_id}` "
+                   f"— open **Predictions** or **Live Simulation** now.")
+        rf = trained.model_results.get("random_forest", {})
+        if rf.get("available"):
+            m = rf["metrics"]
+            st.write(f"Random Forest on the held-out test period → F1 (delayed) "
+                     f"{m['f1_delayed']:.2f} · ROC-AUC "
+                     f"{m['roc_auc'] if m['roc_auc'] is not None else 'n/a'} · "
+                     f"{m['n']} test rows (synthetic demo).")
+
+    st.markdown("---")
 
     left, right = st.columns(2)
     with left:
