@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Runtime data (generated locally, kept out of version control)
+data/
+models/
+runtime/
+logs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Environment
+.env
