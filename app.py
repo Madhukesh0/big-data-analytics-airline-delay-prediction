@@ -23,6 +23,7 @@ from skypredict.config import (
     METRICS_DB_PATH,
     MODELS_DIR,
     UPLOAD_DIR,
+    ensure_runtime_dirs,
 )
 from skypredict.data.demo_data import SYNTHETIC_SOURCE_LABEL, generate_demo_data
 from skypredict.data.validate import validate_and_clean
@@ -38,6 +39,11 @@ st.set_page_config(
     page_icon="✈️",
     layout="wide",
 )
+
+# Make sure the local runtime directories exist on first boot anywhere
+# (most importantly on Streamlit Cloud, where the app starts with an empty
+# filesystem and "Generate demo data" writes into data/raw/).
+ensure_runtime_dirs()
 
 FOOTER = (
     "SkyPredict — Airline Delay Prediction · Course **BCS714 D** · "
